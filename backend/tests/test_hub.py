@@ -185,3 +185,46 @@ def test_export_for_the_import(client, wehub, monkeypatch):
     f = out['families'][0]
     assert f['members'] == [{'email': 'fil@example.com', 'name': 'Fil', 'role': 'admin'}]
     assert [p['name'] for p in f['people']] == ['Luca'] and f['hub_id'] is None
+
+
+def merge(c, into, families, key=KEY):
+    return c.post('/api/hub/merge', json={'into': into, 'families': families}, headers={'Authorization': 'Bearer ' + key})
+
+
+def test_merge_two_families_made_separately(client, wehub, monkeypatch):
+    """Fil and Sara each signed up before weHub: Sara's family is merged into Fil's, nothing is lost."""
+    import backup
+    monkeypatch.setattr(hub, 'URL', '')
+    monkeypatch.setattr(auth, 'PASSWORD_LOGIN', True)
+    fil, sara = client(), client()
+    a = sign_up(fil)
+    b = sign_up(sara, email='sara@example.com', name='Sara')
+    luca_a = ok(fil.post('/api/family/people', json={'name': 'Luca'}), 201)['id']
+    luca_b = ok(sara.post('/api/family/people', json={'name': 'luca'}), 201)['id']
+    nonna = ok(sara.post('/api/family/people', json={'name': 'Nonna'}), 201)['id']
+    la = ok(fil.post('/api/labels', json={'name': 'Casa'}), 201)['id']
+    lb = ok(sara.post('/api/labels', json={'name': 'casa'}), 201)['id']
+    lst = ok(sara.post('/api/lists', json={'name': 'Spesa Sara'}), 201)['id']
+    i1 = ok(sara.post('/api/items', json={'title': 'Pediatra', 'person_id': luca_b, 'labels': [lb]}), 201)['id']
+    i2 = ok(sara.post('/api/items', json={'title': 'Visita nonna', 'person_id': nonna}), 201)['id']
+    i3 = ok(sara.post(f'/api/lists/{lst}/items', json={'items': ['latte']}), 201)
+    ok(fil.post('/api/items', json={'title': 'Bollo', 'labels': [la]}), 201)
+    c = client()
+    assert merge(c, a['family']['id'], [b['family']['id']], key='wrong').status_code == 401
+    r = ok(merge(c, a['family']['id'], [b['family']['id']]))
+    assert r['report']['people_merged'] == 1 and r['report']['labels_merged'] == 1 and r['report']['families'] == 1
+    assert any(x['name'].startswith('pre-merge') for x in backup.list_backups())
+    # Sara is now in Fil's family and sees everything there
+    me = ok(sara.get('/api/me'))
+    assert me['family']['id'] == a['family']['id'] and {m['name'] for m in me['members']} == {'Fil', 'Sara'}
+    assert {p['name'] for p in me['people']} == {'Luca', 'Nonna'}
+    assert ok(fil.get(f'/api/items/{i1}'))['person_id'] == luca_a
+    assert ok(fil.get(f'/api/items/{i2}'))['person_id'] == nonna
+    assert any(x['id'] == lst for x in ok(fil.get('/api/lists')))
+    with db.transaction() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM families').fetchone()[0] == 1
+        assert conn.execute('SELECT COUNT(*) FROM items').fetchone()[0] == 4
+        assert conn.execute('SELECT label_id FROM item_labels WHERE item_id = ?', (i1,)).fetchone()[0] == la
+    # Nothing left to merge, and a family linked to weHub cannot be merged away
+    assert merge(c, a['family']['id'], [b['family']['id']]).status_code == 404
+    assert merge(c, a['family']['id'], []).status_code == 400

@@ -198,6 +198,69 @@ def export():
     return jsonify(families=out)
 
 
+# ---------- For weHub: merging families made separately before weHub ----------
+
+@bp.post('/hub/merge')
+def merge():
+    """{into: local family id, families: [local family ids]}: move everything of those families into `into`.
+    Called by weHub's import when two people had made separate families before. A backup of the database is made
+    first; nothing is deleted except the emptied families (checked: if any row still belongs to one, nothing is done)."""
+    presented = request.headers.get('Authorization', '')[7:].strip()
+    if not KEY or not hmac.compare_digest(KEY, presented):
+        return jsonify(error='Unknown key'), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        into = int(d.get('into'))
+        sources = sorted({int(x) for x in d.get('families') or []} - {into})
+    except (TypeError, ValueError):
+        return jsonify(error='Invalid request'), 400
+    if not sources:
+        return jsonify(error='Nothing to merge'), 400
+    with db.transaction() as conn:
+        found = {r['id']: r for r in conn.execute(
+            f"SELECT id, hub_id FROM families WHERE id IN ({','.join('?' * (len(sources) + 1))})", (into, *sources))}
+        if into not in found or any(s not in found for s in sources):
+            return jsonify(error='Family not found'), 404
+        if any(found[s]['hub_id'] for s in sources):
+            return jsonify(error='A family linked to weHub cannot be merged into another'), 409
+    import backup
+    backup.create_backup('pre-merge')
+    report = {}
+    try:
+        with db.transaction() as conn:
+            for src in sources:
+                merge_family(conn, src, into, report)
+            bump(conn, into)
+    except RuntimeError as e:
+        print(f'[hub] merge cancelled: {e}', flush=True)
+        return jsonify(error=str(e)), 409
+    print(f'[hub] merged families {sources} into {into}: {report}', flush=True)
+    return jsonify(merged=sources, into=into, report=report)
+
+
+def merge_family(conn, src, dst, report):
+    """Move one family into another inside the caller's transaction."""
+    merge_data(conn, src, dst, report)
+    # Members: everyone of both families stays (a role already held in the destination wins)
+    for m in conn.execute('SELECT user_id, role FROM members WHERE family_id = ?', (src,)).fetchall():
+        conn.execute('INSERT OR IGNORE INTO members (family_id, user_id, role) VALUES (?,?,?)', (dst, m['user_id'], m['role']))
+    conn.execute('DELETE FROM members WHERE family_id = ?', (src,))
+    conn.execute("DELETE FROM tokens WHERE family_id = ?", (src,))  # pending invitations of the old family
+    # Safety net: no table may still hold rows of the old family, otherwise deleting it would cascade
+    tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'families'")]
+    left = [t for t in tables if 'family_id' in {c[1] for c in conn.execute(f'PRAGMA table_info({t})')}
+            and conn.execute(f'SELECT 1 FROM {t} WHERE family_id = ? LIMIT 1', (src,)).fetchone()]
+    if left:
+        raise RuntimeError(f'family {src} still has rows in {left}: merge cancelled')
+    conn.execute('DELETE FROM families WHERE id = ?', (src,))
+    report['families'] = report.get('families', 0) + 1
+
+
+def _count(report, key, n):
+    if n:
+        report[key] = report.get(key, 0) + n
+
+
 # ======================================================================
 # This app's people: people without an account, to put in charge of things
 # ======================================================================
@@ -240,3 +303,31 @@ def on_member_removed(conn, family_id, user_id):
     conn.execute('UPDATE items SET assignee_id = NULL WHERE family_id = ? AND assignee_id = ?', (family_id, user_id))
     conn.execute('DELETE FROM calendar_feeds WHERE user_id = ? AND family_id = ?', (user_id, family_id))
     conn.execute('DELETE FROM api_tokens WHERE user_id = ? AND family_id = ?', (user_id, family_id))
+
+
+def merge_data(conn, src, dst, report):
+    """doTrack: people and labels with the same name become one; lists, to-dos, notifications and keys move."""
+    for p in conn.execute('SELECT id, name FROM people WHERE family_id = ?', (src,)).fetchall():
+        t = conn.execute('SELECT id FROM people WHERE family_id = ? AND name = ? COLLATE NOCASE', (dst, p['name'])).fetchone()
+        if t:
+            conn.execute('UPDATE items SET person_id = ? WHERE person_id = ?', (t['id'], p['id']))
+            conn.execute('DELETE FROM people WHERE id = ?', (p['id'],))
+            _count(report, 'people_merged', 1)
+        else:
+            conn.execute('UPDATE people SET family_id = ? WHERE id = ?', (dst, p['id']))
+    for lb in conn.execute('SELECT id, name FROM labels WHERE family_id = ?', (src,)).fetchall():
+        t = conn.execute('SELECT id FROM labels WHERE family_id = ? AND name = ? COLLATE NOCASE', (dst, lb['name'])).fetchone()
+        if t:
+            conn.execute('UPDATE OR IGNORE item_labels SET label_id = ? WHERE label_id = ?', (t['id'], lb['id']))
+            conn.execute('DELETE FROM item_labels WHERE label_id = ?', (lb['id'],))
+            conn.execute('DELETE FROM labels WHERE id = ?', (lb['id'],))
+            _count(report, 'labels_merged', 1)
+        else:
+            conn.execute('UPDATE labels SET family_id = ? WHERE id = ?', (dst, lb['id']))
+    _count(report, 'lists', conn.execute('UPDATE lists SET family_id = ? WHERE family_id = ?', (dst, src)).rowcount)
+    # Names given by CalDAV clients must stay unique inside a family
+    conn.execute('''UPDATE items SET caldav_name = NULL WHERE family_id = ? AND caldav_name IN
+                    (SELECT caldav_name FROM items WHERE family_id = ? AND caldav_name IS NOT NULL)''', (src, dst))
+    _count(report, 'items', conn.execute('UPDATE items SET family_id = ? WHERE family_id = ?', (dst, src)).rowcount)
+    for table in ('notifications', 'calendar_feeds', 'api_tokens', 'webhooks'):
+        conn.execute(f'UPDATE {table} SET family_id = ? WHERE family_id = ?', (dst, src))
