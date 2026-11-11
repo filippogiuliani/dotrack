@@ -228,3 +228,30 @@ def test_merge_two_families_made_separately(client, wehub, monkeypatch):
     # Nothing left to merge, and a family linked to weHub cannot be merged away
     assert merge(c, a['family']['id'], [b['family']['id']]).status_code == 404
     assert merge(c, a['family']['id'], []).status_code == 400
+
+
+def test_other_apps_add_to_lists_through_wehub(client, wehub):
+    """eaTrack → weHub → doTrack: the shopping lists of a weHub family, and entries added as the member who sent them."""
+    fil, sara = user(10, 'Fil', 'fil@example.com'), user(11, 'Sara', 'sara@example.com')
+    wehub.users = {'fil@example.com': fil, 'sara@example.com': sara}
+    family(wehub, hub_id=7, members=[{**fil, 'role': 'admin'}, sara])
+    wehub.access = {10: [7], 11: [7]}
+    H = {'Authorization': 'Bearer ' + KEY}
+    assert client().get('/api/hub/families/7/lists', headers=H).status_code == 404   # nobody signed in yet
+    c = client()
+    sign_in(c, wehub, 'fil@example.com')
+    sign_in(client(), wehub, 'sara@example.com')
+    spesa = ok(c.post('/api/lists', json={'name': 'Spesa', 'kind': 'checklist'}), 201)['id']
+    ok(c.post('/api/lists', json={'name': 'Progetto', 'kind': 'project'}), 201)
+    assert client().get('/api/hub/families/7/lists').status_code == 401
+    assert client().get('/api/hub/families/7/lists', headers={'Authorization': 'Bearer dt_x'}).status_code == 401
+    lists = ok(client().get('/api/hub/families/7/lists', headers=H))
+    assert 'Progetto' not in [x['name'] for x in lists] and spesa in [x['id'] for x in lists]
+    r = ok(client().post(f'/api/hub/families/7/lists/{spesa}/items?user=11', headers=H, json={'items': ['Zucchine', '2 kg mele']}), 201)
+    assert [i['title'] for i in r['added']] == ['Zucchine', 'mele'] and r['skipped'] == []
+    sara_id = next(m['id'] for m in ok(c.get('/api/me'))['members'] if m['name'] == 'Sara')
+    assert {i['created_by'] for i in r['added']} == {sara_id}
+    r = ok(client().post(f'/api/hub/families/7/lists/{spesa}/items', headers=H, json={'items': ['zucchine', 'Pane']}), 201)
+    assert r['skipped'] == ['zucchine'] and [i['title'] for i in r['added']] == ['Pane']
+    # Another family's list is not reachable
+    assert client().post('/api/hub/families/7/lists/99999/items', headers=H, json={'items': ['x']}).status_code == 404

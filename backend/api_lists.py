@@ -169,7 +169,18 @@ def suggestions(list_id):
 def add_many(list_id):
     """Add several things at once (integrations: eaTrack, Home Assistant, scripts).
     items: ["latte", "2 kg mele", {"title": "pane", "quantity": "1"}]. What is already on the list (not ticked) is skipped."""
-    entries = body().get('items')
+    added, skipped = add_entries(list_id, body().get('items'))
+    return jsonify(added=added, skipped=skipped), 201
+
+
+def checklists(conn):
+    """The lists other apps may add to (eaTrack's menu → shopping): open checklists, no templates."""
+    return [{'id': x['id'], 'name': x['name']} for x in _lists(conn)
+            if x['kind'] == 'checklist' and not x['archived'] and not x['template']]
+
+
+def add_entries(list_id, entries):
+    """(added items, skipped titles) for the list of g.family_id, as g.user."""
     if not isinstance(entries, list) or not entries or len(entries) > 200:
         abort(400, 'Invalid request (JSON expected)')
     added, skipped = [], []
@@ -191,7 +202,7 @@ def add_many(list_id):
             added.append(insert_item(conn, {'kind': 'task', 'category': 'shopping' if lst['kind'] == 'checklist' else 'home',
                                             **{k: e[k] for k in ('quantity', 'notes', 'section', 'due_date', 'priority') if k in e},
                                             'title': title, 'list_id': list_id}))
-    return jsonify(added=added, skipped=skipped), 201
+    return added, skipped
 
 
 @bp.post('/lists/<int:list_id>/clear-done')

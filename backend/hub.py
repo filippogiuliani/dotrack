@@ -198,6 +198,53 @@ def export():
     return jsonify(families=out)
 
 
+# ---------- For weHub: other family apps adding to doTrack's lists ----------
+# eaTrack sends the weekly menu's foods to a shopping list through weHub (which holds this app's key): no address
+# or token to paste in eaTrack. The family is weHub's id; the entries are added as the member who sent them.
+
+def _service_family(hub_family_id):
+    """g.family_id / g.user / g.role for a request weHub makes for a family, or an error response."""
+    presented = request.headers.get('Authorization', '')[7:].strip()
+    if not KEY or not hmac.compare_digest(KEY, presented):
+        return jsonify(error='Unknown key'), 401
+    with db.transaction() as conn:
+        f = conn.execute('SELECT id FROM families WHERE hub_id = ?', (hub_family_id,)).fetchone()
+        if not f:
+            return jsonify(error='doTrack does not know this family yet: sign in to doTrack once'), 404
+        user_hub_id = request.args.get('user', type=int)
+        # The member who asked; when they do not use doTrack, the family's first admin
+        u = conn.execute('''SELECT u.id, u.email, u.name, u.email_verified, u.session_version, u.language, u.reminders_email, m.role
+                            FROM members m JOIN users u ON u.id = m.user_id WHERE m.family_id = ?
+                            ORDER BY (u.hub_id IS ? AND u.hub_id IS NOT NULL) DESC, m.role = 'admin' DESC, m.created_at
+                            LIMIT 1''', (f['id'], user_hub_id)).fetchone()
+        if not u:
+            return jsonify(error='The family has no members in doTrack'), 404
+    from flask import g
+    u = dict(u)
+    g.role = u.pop('role')
+    g.user, g.family_id, g.families, g.via_token = u, f['id'], [], True
+    return None
+
+
+@bp.get('/hub/families/<int:hub_family_id>/lists')
+def service_lists(hub_family_id):
+    if err := _service_family(hub_family_id):
+        return err
+    from api_lists import checklists
+    with db.transaction() as conn:
+        return jsonify(checklists(conn))
+
+
+@bp.post('/hub/families/<int:hub_family_id>/lists/<int:list_id>/items')
+def service_add_items(hub_family_id, list_id):
+    """?user=<weHub user id>  {items: ["latte", …]} → {added: [...], skipped: [...]} (already on the list: skipped)."""
+    if err := _service_family(hub_family_id):
+        return err
+    from api_lists import add_entries
+    added, skipped = add_entries(list_id, (request.get_json(silent=True) or {}).get('items'))
+    return jsonify(added=added, skipped=skipped), 201
+
+
 # ---------- For weHub: merging families made separately before weHub ----------
 
 @bp.post('/hub/merge')
