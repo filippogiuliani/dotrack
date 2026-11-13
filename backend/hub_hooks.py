@@ -1,6 +1,8 @@
 """doTrack's part of the weHub link (the rest is famkit.hub): who this app's people are, what happens when a
 member leaves, how two families made separately are merged. Registered in app.py with hub.use(hub_hooks)."""
-from flask import jsonify, request
+import re
+
+from flask import abort, g, jsonify, request
 
 import db
 from famkit import hub
@@ -95,3 +97,94 @@ def service_add_items(list_id):
     from api_lists import add_entries
     added, skipped = add_entries(list_id, (request.get_json(silent=True) or {}).get('items'))
     return jsonify(added=added, skipped=skipped), 201
+
+
+# ---------- paTrack: deadlines of documents (identity card, licence, warranty…) ----------
+# paTrack decides: when someone asks for it on a document with an expiry date, paTrack puts the deadline here and keeps
+# it in step (date, reminder, who it is about, link to the document). What people add in doTrack (labels, notes,
+# priority, a repetition) stays. A deadline deleted here is not created again: paTrack is told and stops.
+
+PATRACK_CATEGORIES = {'identity': 'documents', 'health': 'health', 'child': 'kids', 'home': 'home', 'car': 'car',
+                      'tax': 'money', 'work': 'work', 'purchases': 'documents', 'bank': 'money', 'insurance': 'money'}
+REF = re.compile(r'patrack-\d+')
+
+
+def in_charge(conn, d):
+    """(assignee_id, person_id) from the weHub ids another app sends: a member, or a person without an account."""
+    if d.get('member_hub_id'):
+        r = conn.execute('SELECT u.id FROM users u JOIN members m ON m.user_id = u.id AND m.family_id = ? WHERE u.hub_id = ?',
+                         (g.family_id, d['member_hub_id'])).fetchone()
+        if r:
+            return r['id'], None
+    if d.get('person_hub_id'):
+        r = conn.execute('SELECT id FROM people WHERE family_id = ? AND hub_id = ?', (g.family_id, d['person_hub_id'])).fetchone()
+        if r:
+            return None, r['id']
+    return None, None
+
+
+def hub_ids_of(conn, assignee_id, person_id):
+    """The other way round: {member_hub_id} or {person_hub_id} for an item's assignee or person."""
+    if assignee_id:
+        r = conn.execute('SELECT hub_id FROM users WHERE id = ?', (assignee_id,)).fetchone()
+        return {'member_hub_id': r['hub_id']} if r and r['hub_id'] else {}
+    if person_id:
+        r = conn.execute('SELECT hub_id FROM people WHERE id = ?', (person_id,)).fetchone()
+        return {'person_hub_id': r['hub_id']} if r and r['hub_id'] else {}
+    return {}
+
+
+def _url(value):
+    v = str(value or '')[:500]
+    return v if v.startswith(('https://', 'http://')) else None
+
+
+@hub.service('/deadlines/<ref>', methods=['PUT'])
+def put_deadline(ref):
+    """{title, due_date, remind_days, category, notes, url, member_hub_id | person_hub_id} → {item_id, created | deleted}"""
+    import api_items
+    if not REF.fullmatch(ref):
+        abort(400, 'Invalid request')
+    d = request.get_json(silent=True) or {}
+    with db.transaction() as conn:
+        assignee_id, person_id = in_charge(conn, d)
+        wanted = {'kind': 'deadline', 'title': d.get('title'), 'due_date': d.get('due_date'), 'remind_days': d.get('remind_days'),
+                  'category': PATRACK_CATEGORIES.get(d.get('category'), 'documents'), 'notes': d.get('notes') or '',
+                  'assignee_id': assignee_id, 'person_id': person_id}
+        if not wanted['due_date']:
+            abort(400, 'A date is required')
+        cur = conn.execute('SELECT * FROM items WHERE family_id = ? AND ext_ref = ?', (g.family_id, ref)).fetchone()
+        if cur and cur['deleted_at']:
+            return jsonify(item_id=cur['id'], deleted=True)
+        if not cur:
+            item = api_items.insert_item(conn, wanted)
+            conn.execute('UPDATE items SET ext_ref = ?, ext_url = ? WHERE id = ?', (ref, _url(d.get('url')), item['id']))
+            return jsonify(item_id=item['id'], created=True), 201
+        f = api_items.fields(conn, wanted)
+        mine = {k: f[k] for k in ('title', 'due_date', 'remind_days', 'assignee_id', 'person_id')}
+        if mine['remind_days'] is None:
+            mine['remind_time'] = None
+        mine['ext_url'] = _url(d.get('url')) or cur['ext_url']
+        if any(cur[k] != v for k, v in mine.items()):
+            conn.execute(f"UPDATE items SET {', '.join(k + ' = ?' for k in mine)}, updated_at = datetime('now') WHERE id = ?",
+                         (*mine.values(), cur['id']))
+            api_items.log(conn, cur['id'], 'updated')
+            if cur['done_at'] and mine['due_date'] != cur['due_date']:
+                api_items.reopen_item(conn, cur['id'], g.family_id)   # renewed document, new expiry: open again
+        return jsonify(item_id=cur['id'], created=False)
+
+
+@hub.service('/deadlines/<ref>', methods=['DELETE'])
+def delete_deadline(ref):
+    """The document went to the trash, lost its expiry date or no longer wants it: the deadline goes to the trash."""
+    import api_items
+    if not REF.fullmatch(ref):
+        abort(400, 'Invalid request')
+    with db.transaction() as conn:
+        cur = conn.execute('SELECT id FROM items WHERE family_id = ? AND ext_ref = ? AND deleted_at IS NULL',
+                           (g.family_id, ref)).fetchone()
+        if cur:
+            api_items.trash_item(conn, cur['id'])
+            # The reference is freed: asked again later, the document gets a new deadline (not this one restored)
+            conn.execute('UPDATE items SET ext_ref = NULL WHERE id = ?', (cur['id'],))
+    return jsonify(ok=True)

@@ -318,6 +318,8 @@ ADDED_COLUMNS = [
     ('families', 'hub_version', 'INTEGER'),         # weHub version last copied
     ('users', 'hub_id', 'INTEGER'),
     ('people', 'hub_id', 'INTEGER'),
+    ('items', 'ext_ref', 'TEXT'),                   # kept in step by another family app, e.g. "patrack-12" (hub_hooks.py)
+    ('items', 'ext_url', 'TEXT'),                   # where that app shows it (the paTrack document)
 ]
 
 
@@ -339,6 +341,7 @@ def init_db():
         conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_items_caldav_name ON items(family_id, caldav_name)')
         conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_families_hub ON families(hub_id)')
         conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_hub ON users(hub_id)')
+        conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_items_ext ON items(family_id, ext_ref)')
         conn.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
         conn.execute('PRAGMA journal_mode = WAL')
         conn.commit()

@@ -2,6 +2,7 @@
 export default {
   'nav.sections': 'Sezioni', 'nav.agenda': 'Agenda', 'nav.deadlines': 'Scadenze', 'nav.appointments': 'Appuntamenti',
   'nav.apps': 'Le app di famiglia', 'nav.home': 'Home di famiglia',
+  "patrack.archive": "Archivia il documento in paTrack", "patrack.archive_note": "Il file va nell'archivio di famiglia con questa scadenza, che poi paTrack tiene aggiornata.", "patrack.open": "Documento in paTrack", "patrack.kept_in_step": "Data e persona seguono il documento in paTrack.", "patrack.sent": "Documento archiviato in paTrack", "patrack.needs_date": "Prima il titolo e la data della scadenza",
   'nav.calendar': 'Calendario', 'nav.family': 'Famiglia',
 
   'common.wait': 'Attendi…', 'common.close': 'Chiudi', 'common.delete': 'Elimina', 'common.optional': 'facoltativo',

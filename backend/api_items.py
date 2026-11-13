@@ -125,6 +125,11 @@ def get_item(item_id):
 
 # ---------- Writing ----------
 
+def fields(conn, d):
+    """Validated columns of an item from API data."""
+    return _fields(conn, d)
+
+
 def _fields(conn, d):
     kind = d.get('kind', 'task')
     if kind not in db.KINDS:
@@ -671,3 +676,52 @@ def cleanup_orphan_files():
             os.remove(os.path.join(d, name))
             removed += 1
     return removed
+
+
+# ---------- A deadline's document goes to paTrack (weHub mode) ----------
+# Instead of an attachment kept here, the file goes to the family archive in paTrack, with the expiry date, the person
+# and the reminder; from then on paTrack keeps this deadline in step with the document (see hub_hooks.put_deadline).
+
+TO_PATRACK_CATEGORIES = {'health': 'health', 'kids': 'child', 'school': 'child', 'car': 'car', 'home': 'home',
+                         'money': 'bank', 'work': 'work', 'documents': 'identity'}
+
+
+@bp.post('/items/<int:item_id>/to-patrack')
+def to_patrack(item_id):
+    import base64
+
+    import hub_hooks
+    from famkit import hub
+    f = request.files.get('file')
+    if not f or not f.filename:
+        abort(400, 'No file uploaded')
+    name = os.path.basename(f.filename.replace('\\', '/'))[:200] or 'file'
+    ext = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    if ext not in FILE_TYPES:
+        abort(400, 'File type not allowed')
+    data = f.read()
+    with db.transaction() as conn:
+        item = _one(conn, item_id)
+        if item['kind'] != 'deadline' or not item['due_date']:
+            abort(400, 'Only a deadline with a date goes to paTrack')
+        if item.get('ext_ref'):
+            abort(409, 'This deadline already has its document in paTrack')
+        ids = hub.family_ids(conn, g.family_id) if hub.enabled() else None
+        if not ids:
+            abort(400, 'paTrack is reached through weHub: not available here')
+        who = hub_hooks.hub_ids_of(conn, item['assignee_id'], item['person_id'])
+    payload = {'file_name': name, 'content': base64.b64encode(data).decode(), 'title': item['title'],
+               'expiry_date': item['due_date'], 'remind_days': item['remind_days'], 'dotrack_item': item_id,
+               'category': TO_PATRACK_CATEGORIES.get(item['category']), 'notes': item['notes'][:2000], **who}
+    try:
+        r = hub.ask('patrack', 'POST', '/documents', ids[0], ids[1], payload, timeout=60)
+    except hub.AskError as e:
+        abort(e.status, e.message)
+    except hub.Unavailable as e:
+        print(f'[patrack] {e}', flush=True)
+        abort(502, 'paTrack is not reachable')
+    with db.transaction() as conn:
+        conn.execute("UPDATE items SET ext_ref = ?, ext_url = ?, updated_at = datetime('now') WHERE id = ?",
+                     (f"patrack-{int(r['id'])}", hub_hooks._url(r.get('url')), item_id))
+        log(conn, item_id, 'updated')
+        return jsonify(_one(conn, item_id)), 201

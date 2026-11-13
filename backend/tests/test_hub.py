@@ -261,3 +261,84 @@ def test_other_apps_add_to_lists_through_wehub(client, wehub):
     assert r['skipped'] == ['zucchine'] and [i['title'] for i in r['added']] == ['Pane']
     # Another family's list is not reachable
     assert client().post('/api/hub/families/7/lists/99999/items', headers=H, json={'items': ['x']}).status_code == 404
+
+
+def _hub_family_with_luca(client, wehub):
+    fil, sara = user(10, 'Fil', 'fil@example.com'), user(11, 'Sara', 'sara@example.com')
+    wehub.users = {'fil@example.com': fil, 'sara@example.com': sara}
+    family(wehub, hub_id=7, members=[{**fil, 'role': 'admin'}, sara],
+           people=[{'hub_id': 100, 'name': 'Fil', 'user_hub_id': 10}, {'hub_id': 102, 'name': 'Luca', 'kind': 'child', 'user_hub_id': None}])
+    wehub.access = {10: [7], 11: [7]}
+    c = client()
+    sign_in(c, wehub, 'fil@example.com')
+    return c
+
+
+def test_patrack_keeps_a_document_deadline_in_step(client, wehub):
+    c = _hub_family_with_luca(client, wehub)
+    H = {'Authorization': 'Bearer ' + KEY}
+    put = lambda ref, **d: client().put(f'/api/hub/families/7/deadlines/{ref}?user=10&from=patrack', headers=H, json=d)  # noqa: E731
+    doc = {'title': "Carta d'identità", 'due_date': '2031-03-04', 'remind_days': 60, 'category': 'identity',
+           'person_hub_id': 102, 'url': 'https://pa.example/#/doc/12', 'notes': 'paTrack'}
+    assert put('patrack-12').status_code == 400 and put('other-12', **doc).status_code == 400
+    r = ok(put('patrack-12', **doc), 201)
+    item = ok(c.get(f"/api/items/{r['item_id']}"))
+    luca = next(p['id'] for p in ok(c.get('/api/me'))['people'] if p['name'] == 'Luca')
+    assert (item['kind'], item['title'], item['due_date'], item['remind_days'], item['category'], item['person_id']) == \
+        ('deadline', "Carta d'identità", '2031-03-04', 60, 'documents', luca)
+    assert item['ext_url'] == 'https://pa.example/#/doc/12' and item['ext_ref'] == 'patrack-12'
+    # Things added in doTrack stay; paTrack's fields follow the document; done + new expiry = open again
+    ok(c.put(f"/api/items/{item['id']}", json={**item, 'priority': 1, 'notes': 'portare foto'}))
+    ok(c.post(f"/api/items/{item['id']}/done"))
+    r2 = ok(put('patrack-12', **{**doc, 'due_date': '2041-03-04', 'member_hub_id': 10, 'url': 'javascript:x'}))
+    assert r2 == {'item_id': item['id'], 'created': False}
+    item = ok(c.get(f"/api/items/{item['id']}"))
+    fil = ok(c.get('/api/me'))['user']['id']
+    assert (item['due_date'], item['priority'], item['notes'], item['done'], item['assignee_id'], item['person_id']) == \
+        ('2041-03-04', 1, 'portare foto', False, fil, None)
+    assert item['ext_url'] == 'https://pa.example/#/doc/12'
+    # Deleted by someone in doTrack: not created again, paTrack is told
+    ok(c.delete(f"/api/items/{item['id']}"))
+    assert ok(put('patrack-12', **doc)) == {'item_id': item['id'], 'deleted': True}
+    # Asked by paTrack to remove it: to the trash, and the reference is free for a new one
+    r = ok(put('patrack-13', **doc), 201)
+    assert ok(client().delete('/api/hub/families/7/deadlines/patrack-13?user=10', headers=H)) == {'ok': True}
+    assert c.get(f"/api/items/{r['item_id']}").status_code == 404
+    assert ok(put('patrack-13', **doc), 201)['item_id'] != r['item_id']
+    assert client().put('/api/hub/families/7/deadlines/patrack-14', json=doc).status_code == 401
+
+
+def test_a_deadline_document_goes_to_patrack(client, wehub, monkeypatch):
+    import io
+    import requests
+    c = _hub_family_with_luca(client, wehub)
+    luca = next(p['id'] for p in ok(c.get('/api/me'))['people'] if p['name'] == 'Luca')
+    item = ok(c.post('/api/items', json={'kind': 'deadline', 'title': 'Passaporto Luca', 'due_date': '2030-05-01',
+                                         'remind_days': 90, 'person_id': luca, 'category': 'documents'}), 201)
+    calls = []
+
+    class R:
+        status_code = 201
+        def json(self): return {'id': 55, 'url': 'https://pa.example/#/doc/55'}
+
+    monkeypatch.setattr(requests, 'request', lambda method, url, **kw: calls.append((method, url, kw)) or R())
+    send = lambda i: c.post(f'/api/items/{i}/to-patrack', data={'file': (io.BytesIO(b'%PDF-1.4 x'), 'passaporto.pdf')})  # noqa: E731
+    r = ok(send(item['id']), 201)
+    assert r['ext_ref'] == 'patrack-55' and r['ext_url'] == 'https://pa.example/#/doc/55' and r['attachments'] == []
+    method, url, kw = calls[0]
+    assert (method, url) == ('POST', 'http://wehub.test/api/service/apps/patrack/families/7/documents')
+    p = kw['json']
+    assert (p['file_name'], p['expiry_date'], p['remind_days'], p['person_hub_id'], p['category'], p['dotrack_item']) == \
+        ('passaporto.pdf', '2030-05-01', 90, 102, 'identity', item['id'])
+    assert kw['params'] == {'user': 10}
+    assert send(item['id']).status_code == 409                       # it already has its document
+    task = ok(c.post('/api/items', json={'title': 'Comprare latte'}), 201)
+    assert send(task['id']).status_code == 400                       # only deadlines
+
+    class Refused:
+        status_code = 403
+        def json(self): return {'error': 'You do not use paTrack in this family'}
+    monkeypatch.setattr(requests, 'request', lambda method, url, **kw: Refused())
+    other = ok(c.post('/api/items', json={'kind': 'deadline', 'title': 'Bollo', 'due_date': '2030-01-31'}), 201)
+    r = send(other['id'])
+    assert r.status_code == 403 and r.get_json()['error'] == 'Non usi paTrack in questa famiglia'

@@ -142,6 +142,12 @@ IT = {
     'Too many app passwords': 'Troppe password per app',
     # Field names inside patterns
     'date': 'data', 'time': 'ora', 'end time': 'ora di fine', 'end date': 'data di fine', 'reminder time': 'ora del promemoria',
+    'Only a deadline with a date goes to paTrack': 'Solo una scadenza con la data va in paTrack',
+    'This deadline already has its document in paTrack': 'Questa scadenza ha già il suo documento in paTrack',
+    'paTrack is reached through weHub: not available here': 'paTrack si raggiunge tramite weHub: qui non è disponibile',
+    'paTrack is not reachable': 'paTrack non è raggiungibile',
+    'You do not use paTrack in this family': 'Non usi paTrack in questa famiglia',
+    'This app may not ask that': "Quest'app non può chiederlo",
 }
 
 IT_PATTERNS = [
