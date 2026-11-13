@@ -1,7 +1,6 @@
 // English
 export default {
   'nav.sections': 'Sections', 'nav.agenda': 'Agenda', 'nav.deadlines': 'Deadlines', 'nav.appointments': 'Appointments',
-  'nav.apps': 'Family apps', 'nav.home': 'Family home',
   "patrack.archive": "Archive the document in paTrack", "patrack.archive_note": "The file goes to the family archive with this deadline, which paTrack then keeps up to date.", "patrack.open": "Document in paTrack", "patrack.kept_in_step": "Date and person follow the document in paTrack.", "patrack.sent": "Document archived in paTrack", "patrack.needs_date": "The deadline's title and date first",
   'nav.calendar': 'Calendar', 'nav.family': 'Family',
 

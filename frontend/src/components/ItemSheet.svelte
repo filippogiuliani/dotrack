@@ -12,6 +12,7 @@
   } from '../lib/items.js';
   import Sheet from './Sheet.svelte';
   import Icon from './Icon.svelte';
+  import { appIcons } from '$famkit/apps.js';
 
   let { item = null, template = {}, onclose } = $props();
 
@@ -536,13 +537,13 @@
       {#if form.kind === 'deadline' && (extUrl || usesPatrack)}
         <div class="patrack">
           {#if extUrl}
-            <a class="btn soft sm" href={extUrl} target="_blank" rel="noopener"><img src="/apps/patrack.svg" alt="" width="18" height="18" />{t('patrack.open')}</a>
+            <a class="btn soft sm" href={extUrl} target="_blank" rel="noopener"><img src={appIcons.patrack} alt="" width="18" height="18" />{t('patrack.open')}</a>
             <span class="tiny muted">{t('patrack.kept_in_step')}</span>
           {:else}
             <input bind:this={patrackInput} class="sr-only" type="file" onchange={toPatrack}
                    accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,.txt,.doc,.docx,.odt,.xls,.xlsx,.csv,.zip,.dcm" />
             <button class="btn soft sm" disabled={uploading || !app.online} onclick={() => patrackInput.click()}>
-              <img src="/apps/patrack.svg" alt="" width="18" height="18" />{t('patrack.archive')}</button>
+              <img src={appIcons.patrack} alt="" width="18" height="18" />{t('patrack.archive')}</button>
             <span class="tiny muted">{t('patrack.archive_note')}</span>
           {/if}
         </div>
