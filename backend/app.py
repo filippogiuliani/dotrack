@@ -7,12 +7,12 @@ from urllib.parse import urlparse
 from flask import Flask, abort, g, jsonify, request, send_from_directory
 
 import auth
-import backup
+from famkit import backup
 import caldav
 import db
-import hub
+import hub_hooks
 import i18n
-import oidc
+from famkit import hub, oidc
 import reminders
 from api_calendar import bp as calendar_bp
 from api_family import bp as family_bp
@@ -61,6 +61,9 @@ def create_app():
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    hub.use(hub_hooks)
+    oidc.use(auth, i18n.tr, lambda conn, name, email, invite, d:
+             auth.create_user(conn, name, email, oidc.NO_PASSWORD, True, invite, d.get('language')))
     oidc.configure(app)
     for bp in (auth.bp, oidc.bp, hub.bp, family_bp, items_bp, calendar_bp, lists_bp, notifications_bp, caldav.bp, security.bp):
         app.register_blueprint(bp, url_prefix='/api')

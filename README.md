@@ -51,6 +51,11 @@ To-dos, deadlines and appointments shared by the family, in the same style as ea
 
 ## Running with Docker
 
+The code shared with the other family apps is in the `backend/famkit` submodule
+([famkit](https://github.com/filippogiuliani/famkit)): clone with
+`git clone --recurse-submodules https://github.com/filippogiuliani/dotrack.git`, or run `git submodule update --init` in a
+clone made without it.
+
 ```sh
 cp .env.example .env    # set DOTRACK_URL, SMTP and optionally Google sign-in
 ./rebuild.sh

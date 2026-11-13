@@ -1,6 +1,7 @@
 """SQLite database: connection and schema."""
 import os
 import sqlite3
+import sys
 from contextlib import contextmanager
 
 DATA_DIR = os.environ.get('DOTRACK_DATA', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data'))
@@ -313,7 +314,7 @@ ADDED_COLUMNS = [
     ('families', 'version', 'INTEGER NOT NULL DEFAULT 0'),  # bumped on every change: clients poll it
     ('users', 'totp_secret', 'TEXT'),               # two-step verification (TOTP), NULL = off
     ('users', 'totp_pending', 'TEXT'),              # secret being set up, not confirmed yet
-    ('families', 'hub_id', 'INTEGER'),              # the family in weHub (see hub.py), NULL = not managed there
+    ('families', 'hub_id', 'INTEGER'),              # the family in weHub (see famkit/hub.py), NULL = not managed there
     ('families', 'hub_version', 'INTEGER'),         # weHub version last copied
     ('users', 'hub_id', 'INTEGER'),
     ('people', 'hub_id', 'INTEGER'),
@@ -343,3 +344,8 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
+
+
+# The shared code (famkit: mail, backups, weHub link, sign-in) reads DOTRACK_* variables and uses this module
+import famkit  # noqa: E402
+famkit.configure('DOTRACK', 'doTrack', sys.modules[__name__])

@@ -4,8 +4,8 @@ from flask import redirect
 
 import auth
 import db
-import hub
-import oidc
+from famkit import hub
+from famkit import oidc
 from conftest import PASSWORD, ok, sign_up
 
 KEY = 'k' * 40
@@ -193,7 +193,7 @@ def merge(c, into, families, key=KEY):
 
 def test_merge_two_families_made_separately(client, wehub, monkeypatch):
     """Fil and Sara each signed up before weHub: Sara's family is merged into Fil's, nothing is lost."""
-    import backup
+    from famkit import backup
     monkeypatch.setattr(hub, 'URL', '')
     monkeypatch.setattr(auth, 'PASSWORD_LOGIN', True)
     fil, sara = client(), client()

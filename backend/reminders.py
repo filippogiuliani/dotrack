@@ -7,7 +7,7 @@ import time
 
 import db
 import i18n
-import mail
+from famkit import mail
 import notify
 from common import next_birthday
 
