@@ -188,3 +188,32 @@ def delete_deadline(ref):
             # The reference is freed: asked again later, the document gets a new deadline (not this one restored)
             conn.execute('UPDATE items SET ext_ref = NULL WHERE id = ?', (cur['id'],))
     return jsonify(ok=True)
+
+
+# ---------- weHub's home: what is coming up ----------
+
+@hub.service('/summary')
+def summary():
+    """{overdue, today, week, items: [{id, title, kind, due_date, due_time, who, mine, url}], url}: open to-dos,
+    deadlines and appointments of the family (birthdays and shopping lists left out), the most urgent first."""
+    import datetime
+
+    from auth import BASE_URL
+    today = datetime.date.today()
+    week = (today + datetime.timedelta(days=7)).isoformat()
+    t = today.isoformat()
+    with db.transaction() as conn:
+        rows = conn.execute('''SELECT i.id, i.title, i.kind, i.due_date, i.due_time, i.assignee_id,
+                                      COALESCE(u.name, p.name) AS who
+                               FROM items i LEFT JOIN users u ON u.id = i.assignee_id LEFT JOIN people p ON p.id = i.person_id
+                               LEFT JOIN lists l ON l.id = i.list_id
+                               WHERE i.family_id = ? AND i.deleted_at IS NULL AND i.done_at IS NULL AND i.due_date IS NOT NULL
+                               AND i.due_date <= ? AND i.kind IN ('task', 'deadline', 'appointment')
+                               AND (l.id IS NULL OR l.kind != 'checklist')
+                               ORDER BY i.due_date, i.due_time IS NULL, i.due_time, i.id''', (g.family_id, week)).fetchall()
+    count = lambda cond: sum(1 for r in rows if cond(r['due_date']))  # noqa: E731
+    return jsonify(overdue=count(lambda d: d < t), today=count(lambda d: d == t), week=count(lambda d: d > t),
+                   items=[{'id': r['id'], 'title': r['title'], 'kind': r['kind'], 'due_date': r['due_date'],
+                           'due_time': r['due_time'], 'who': r['who'], 'mine': r['assignee_id'] == g.user['id'],
+                           'url': f"{BASE_URL}/#/item/{r['id']}" if BASE_URL else None} for r in rows[:6]],
+                   url=BASE_URL or None)

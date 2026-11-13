@@ -131,4 +131,10 @@
   .done .list { width: 100%; }
   .empty { max-width: 720px; display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
   .center { justify-content: center; }
+  /* Wide screens: the groups (overdue, today, next days…) side by side */
+  @media (min-width: 1400px) {
+    .sections { display: block; max-width: none; columns: 2 460px; column-gap: 24px; }
+    .sections > :global(*) { break-inside: avoid; margin: 0 0 20px; }
+    .done { max-width: none; }
+  }
 </style>

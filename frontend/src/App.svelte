@@ -284,7 +284,7 @@
     .nav a:not(.logo) .ico { width: 18px; height: 18px; }
     .nav a:not(.logo) .ico :global(svg) { width: 18px; height: 18px; }
     .nav a.on { background: var(--primary-soft); }
-    .main { padding: 32px 32px 48px; width: 100%; }
+    .main { padding: 32px 32px 48px; width: 100%; max-width: 1680px; }
     .nav-bell { margin-top: auto; padding: 0 6px; }
     .nav-bell :global(.bell) { width: 100%; padding: 9px 6px; font-size: 0.92rem; }
     .logout { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: var(--r-sm);

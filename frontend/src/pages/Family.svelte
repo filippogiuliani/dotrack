@@ -621,7 +621,11 @@
   /* minmax(0, 1fr): a long label must never make the column wider than the phone */
   .layout { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
   .layout > .card { min-width: 0; }
-  @media (min-width: 1000px) { .layout { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+  /* Desktop: the cards flow into up to three columns, each as tall as it needs (no holes under the shorter ones) */
+  @media (min-width: 1000px) {
+    .layout { display: block; columns: 3 360px; column-gap: 14px; }
+    .layout > :global(*) { break-inside: avoid; margin: 0 0 14px; }
+  }
   /* Options with long labels: one under the other, text allowed to wrap */
   .seg.stacked { flex-direction: column; overflow: visible; }
   .seg.stacked button { white-space: normal; text-align: left; justify-content: flex-start; padding: 7px 12px; line-height: 1.3; }

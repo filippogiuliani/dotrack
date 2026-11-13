@@ -342,3 +342,21 @@ def test_a_deadline_document_goes_to_patrack(client, wehub, monkeypatch):
     other = ok(c.post('/api/items', json={'kind': 'deadline', 'title': 'Bollo', 'due_date': '2030-01-31'}), 201)
     r = send(other['id'])
     assert r.status_code == 403 and r.get_json()['error'] == 'Non usi paTrack in questa famiglia'
+
+
+def test_summary_for_wehub_home(client, wehub):
+    import datetime
+    c = _hub_family_with_luca(client, wehub)
+    d = lambda n: (datetime.date.today() + datetime.timedelta(days=n)).isoformat()  # noqa: E731
+    me = ok(c.get('/api/me'))['user']['id']
+    for title, due, extra in (('Bollo', d(-1), {'kind': 'deadline'}), ('Pediatra', d(0), {'kind': 'appointment', 'due_time': '16:30'}),
+                              ('Mio', d(0), {'assignee_id': me}), ('Condominio', d(5), {}), ('Lontano', d(30), {}), ('Senza data', None, {})):
+        ok(c.post('/api/items', json={'title': title, 'due_date': due, **extra}), 201)
+    spesa = ok(c.post('/api/lists', json={'name': 'Spesa', 'kind': 'checklist'}), 201)['id']
+    ok(c.post('/api/items', json={'title': 'Latte', 'due_date': d(0), 'list_id': spesa}), 201)
+    H = {'Authorization': 'Bearer ' + KEY}
+    assert client().get('/api/hub/families/7/summary?user=10').status_code == 401
+    s = ok(client().get('/api/hub/families/7/summary?user=10', headers=H))
+    assert (s['overdue'], s['today'], s['week']) == (1, 2, 1)
+    assert [i['title'] for i in s['items']] == ['Bollo', 'Pediatra', 'Mio', 'Condominio']   # by date, timed first
+    assert next(i for i in s['items'] if i['title'] == 'Mio')['mine'] is True
