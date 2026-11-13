@@ -1,6 +1,7 @@
 // English
 export default {
   'nav.sections': 'Sections', 'nav.agenda': 'Agenda', 'nav.deadlines': 'Deadlines', 'nav.appointments': 'Appointments',
+  'nav.apps': 'Family apps', 'nav.home': 'Family home',
   'nav.calendar': 'Calendar', 'nav.family': 'Family',
 
   'common.wait': 'Please wait…', 'common.close': 'Close', 'common.delete': 'Delete', 'common.optional': 'optional',

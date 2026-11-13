@@ -65,8 +65,11 @@ def user(hub_id, name, email):
 
 def family(fake, hub_id=1, version=1, members=(), people=(), local_id=None, name='Casa'):
     fake.families[hub_id] = {'hub_id': hub_id, 'name': name, 'version': version, 'local_id': local_id,
-                             'members': [{**m, 'role': m.get('role', 'member'), 'level': 'full'} for m in members],
-                             'people': list(people)}
+                             'members': [{**m, 'role': m.get('role', 'member'), 'level': 'full',
+                                          'apps': m.get('apps', ['dotrack'])} for m in members],
+                             'people': list(people),
+                             'apps': [{'id': 'dotrack', 'name': 'doTrack', 'url': 'https://do.example'},
+                                      {'id': 'patrack', 'name': 'paTrack', 'url': 'https://pa.example'}]}
 
 
 def sign_in(c, fake, email, sub=None):
@@ -80,7 +83,7 @@ def sign_in(c, fake, email, sub=None):
 def test_sign_in_creates_the_family_from_wehub(client, wehub):
     fil, sara = user(10, 'Fil', 'fil@example.com'), user(11, 'Sara', 'sara@example.com')
     wehub.users = {'fil@example.com': fil, 'sara@example.com': sara}
-    family(wehub, members=[{**fil, 'role': 'admin'}, sara],
+    family(wehub, members=[{**fil, 'role': 'admin', 'apps': ['dotrack', 'patrack']}, sara],
            people=[{'hub_id': 100, 'name': 'Fil', 'user_hub_id': 10}, {'hub_id': 101, 'name': 'Sara', 'user_hub_id': 11},
                    {'hub_id': 102, 'name': 'Luca', 'kind': 'child', 'user_hub_id': None}])
     wehub.access = {10: [1], 11: [1]}
@@ -89,7 +92,10 @@ def test_sign_in_creates_the_family_from_wehub(client, wehub):
     me = ok(c.get('/api/me'))
     assert me['user']['name'] == 'Fil' and me['family']['name'] == 'Casa' and me['family']['role'] == 'admin'
     assert [m['name'] for m in me['members']] == ['Fil', 'Sara'] and [p['name'] for p in me['people']] == ['Luca']
-    assert me['hub'] == {'url': 'http://wehub.test', 'name': 'weHub'} and me['password_login'] is False and not me['signup_open']
+    assert me['hub']['url'] == 'http://wehub.test' and me['password_login'] is False and not me['signup_open']
+    # The app switcher: the apps Fil may use in this family, this one marked
+    assert [(a['id'], a['url'], a['current']) for a in me['hub']['apps']] == [
+        ('dotrack', 'https://do.example', True), ('patrack', 'https://pa.example', False)]
     # The partner lands in the same family
     s = client()
     sign_in(s, wehub, 'sara@example.com')

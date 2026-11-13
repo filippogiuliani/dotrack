@@ -5,6 +5,7 @@
   import { registration, resyncPush } from './lib/push.js';
   import { setLanguage, t } from './lib/i18n.svelte.js';
   import { get } from './lib/api.js';
+  import AppSwitcher from './components/AppSwitcher.svelte';
   import Toast from './components/Toast.svelte';
   import Icon from './components/Icon.svelte';
   import ItemSheet from './components/ItemSheet.svelte';
@@ -180,6 +181,7 @@
   <div class="shell">
     <nav class="nav" aria-label={t('nav.sections')}>
       <a class="logo" href="#/agenda"><img src="/icon.svg" alt="" width="28" height="28" /><span>doTrack</span></a>
+      <div class="nav-apps hide-mobile"><AppSwitcher hub={app.me.hub} label /></div>
       {#each PAGES as p (p.id)}
         <a href="#/{p.id}" class:on={section === p.id} aria-current={page === p.id ? 'page' : undefined}>
           <span class="ico"><Icon name={p.id} size={22} /></span>
@@ -196,6 +198,7 @@
       <!-- Phone: a slim top bar so signing out is always one tap away -->
       <div class="topbar hide-desktop">
         <a class="brand" href="#/agenda"><img src="/icon.svg" alt="" width="24" height="24" /><span>doTrack</span></a>
+        <AppSwitcher hub={app.me.hub} />
         <span class="grow"></span>
         <Bell />
         <button class="btn ghost sm" onclick={() => logout()} aria-label={t('account.sign_out')}>
@@ -237,6 +240,7 @@
 <Toast />
 
 <style>
+  .nav-apps { margin: -10px 0 8px; }
   .center { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
   .pulse { border-radius: 12px; animation: pulse 1s ease-in-out infinite alternate; }
   @keyframes pulse { to { opacity: 0.5; } }

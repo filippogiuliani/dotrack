@@ -1,6 +1,7 @@
 // Italian
 export default {
   'nav.sections': 'Sezioni', 'nav.agenda': 'Agenda', 'nav.deadlines': 'Scadenze', 'nav.appointments': 'Appuntamenti',
+  'nav.apps': 'Le app di famiglia', 'nav.home': 'Home di famiglia',
   'nav.calendar': 'Calendario', 'nav.family': 'Famiglia',
 
   'common.wait': 'Attendi…', 'common.close': 'Chiudi', 'common.delete': 'Elimina', 'common.optional': 'facoltativo',
